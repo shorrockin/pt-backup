@@ -24,12 +24,27 @@ def tracker_get(url, path)
 end
 
 PivotalTracker::Project.all.each do |project|
-  
   puts "Backing up #{project.name.inspect}..."
   FileUtils.mkdir_p "projects/#{project.name}"
   
   tracker_get \
     "https://www.pivotaltracker.com/services/v3/projects/#{project.id}/stories",
     "projects/#{project.name}/stories.xml"
-  
+end
+
+dump_file = "pivotal.backup.#{Time.now.utc.strftime("%Y%m%d%H%M")}.tar.gz"
+gpg_dump_file = "#{dump_file}.gpg"
+begin
+  puts "Compressing into: #{dump_file}"
+  system("tar czvf #{dump_file} projects/")
+  system("gpg --encrypt --recipient '#{@config['gpg_recipient']}' #{dump_file}")
+
+  puts "Sending backup file to S3"
+  AWS::S3::Base.establish_connection!(:access_key_id => @config['s3_access_key_id'], :secret_access_key => @config['s3_secret_access_key'], :use_ssl => true)
+  AWS::S3::Bucket.create( @config['s3_bucket_name'] )
+  AWS::S3::S3Object.store(File.basename(gpg_dump_file), open(gpg_dump_file), @config['s3_bucket_name'])
+ensure
+  system("rm -Rf projects")
+  system("rm -f #{dump_file}")
+  system("rm -f #{gpg_dump_file}")
 end
